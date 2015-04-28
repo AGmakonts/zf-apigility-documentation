@@ -32,6 +32,58 @@ class Field implements IteratorAggregate
     protected $type = null;
 
     /**
+     * @var bool
+     */
+    protected $nested = FALSE;
+
+    /**
+     * @var array
+     */
+    protected $children = [];
+
+    /**
+     * @return array
+     */
+    public function getChildren()
+    {
+        return $this->children;
+    }
+
+    /**
+     * @return bool
+     */
+    public function hasChildren()
+    {
+        return (FALSE === empty($this->getChildren()));
+    }
+
+    /**
+     * @param array $children
+     */
+    public function setChildren(array $children)
+    {
+        $this->children = $children;
+    }
+
+
+
+    /**
+     * @return boolean
+     */
+    public function isNested()
+    {
+        return $this->nested;
+    }
+
+    /**
+     * @param boolean $nested
+     */
+    public function setNested($nested)
+    {
+        $this->nested = $nested;
+    }
+
+    /**
      * @param string $name
      */
     public function setName($name)
@@ -102,11 +154,11 @@ class Field implements IteratorAggregate
      */
     public function toArray()
     {
-        return array(
+        return [
             'description' => $this->description,
             'required' => $this->required,
             'type' => $this->type,
-        );
+        ];
     }
 
     /**

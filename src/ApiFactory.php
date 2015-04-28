@@ -6,7 +6,11 @@
 
 namespace ZF\Apigility\Documentation;
 
+use Zend\InputFilter\Input;
+use Zend\InputFilter\InputFilter;
+use Zend\InputFilter\InputFilterInterface;
 use Zend\ModuleManager\ModuleManager;
+use Zend\Validator\ValidatorInterface;
 use ZF\Apigility\Provider\ApigilityProviderInterface;
 use ZF\Configuration\ModuleUtils as ConfigModuleUtils;
 
@@ -30,11 +34,11 @@ class ApiFactory
     /**
      * @var array
      */
-    protected $docs = array();
+    protected $docs = [];
 
     /**
-     * @param ModuleManager $moduleManager
-     * @param array $config
+     * @param ModuleManager     $moduleManager
+     * @param array             $config
      * @param ConfigModuleUtils $configModuleUtils
      */
     public function __construct(ModuleManager $moduleManager, $config, ConfigModuleUtils $configModuleUtils)
@@ -51,14 +55,14 @@ class ApiFactory
      */
     public function createApiList()
     {
-        $apigilityModules = array();
+        $apigilityModules = [];
         $q = preg_quote('\\');
         foreach ($this->moduleManager->getModules() as $moduleName) {
             $module = $this->moduleManager->getModule($moduleName);
             if ($module instanceof ApigilityProviderInterface) {
                 $versionRegex = '#' . preg_quote($moduleName) . $q . 'V(?P<version>[^' . $q . ']+)' . $q . '#';
-                $versions = array();
-                $serviceConfigs = array();
+                $versions = [];
+                $serviceConfigs = [];
                 if ($this->config['zf-rest']) {
                     $serviceConfigs = array_merge($serviceConfigs, $this->config['zf-rest']);
                 }
@@ -76,20 +80,22 @@ class ApiFactory
                     }
                 }
 
-                $apigilityModules[] = array(
+                $apigilityModules[] = [
                     'name'     => $moduleName,
                     'versions' => $versions,
-                );
+                ];
             }
         }
+
         return $apigilityModules;
     }
 
     /**
      * Create documentation details for a given API module and version
      *
-     * @param string $apiName
+     * @param string     $apiName
      * @param int|string $apiVersion
+     *
      * @return Api
      */
     public function createApi($apiName, $apiVersion = 1)
@@ -99,7 +105,7 @@ class ApiFactory
         $api->setVersion($apiVersion);
         $api->setName($apiName);
 
-        $serviceConfigs = array();
+        $serviceConfigs = [];
         if ($this->config['zf-rest']) {
             $serviceConfigs = array_merge($serviceConfigs, $this->config['zf-rest']);
         }
@@ -126,9 +132,10 @@ class ApiFactory
      * Create documentation details for a given service in a given version of
      * an API module
      *
-     * @param string $apiName
+     * @param string     $apiName
      * @param int|string $apiVersion
-     * @param string $serviceName
+     * @param string     $serviceName
+     *
      * @return Service
      */
     public function createService(Api $api, $serviceName)
@@ -136,21 +143,21 @@ class ApiFactory
         $service = new Service();
         $service->setApi($api);
 
-        $serviceData = null;
-        $isRest      = false;
-        $isRpc       = false;
-        $hasSegments = false;
-        $hasFields   = false;
+        $serviceData = NULL;
+        $isRest = FALSE;
+        $isRpc = FALSE;
+        $hasSegments = FALSE;
+        $hasFields = FALSE;
 
         foreach ($this->config['zf-rest'] as $serviceClassName => $restConfig) {
             if ((strpos($serviceClassName, $api->getName() . '\\') === 0)
                 && isset($restConfig['service_name'])
                 && ($restConfig['service_name'] === $serviceName)
-                && (strstr($serviceClassName, '\\V' . $api->getVersion() . '\\') !== false)
+                && (strstr($serviceClassName, '\\V' . $api->getVersion() . '\\') !== FALSE)
             ) {
                 $serviceData = $restConfig;
-                $isRest = true;
-                $hasSegments = true;
+                $isRest = TRUE;
+                $hasSegments = TRUE;
                 break;
             }
         }
@@ -160,7 +167,7 @@ class ApiFactory
                 if ((strpos($serviceClassName, $api->getName() . '\\') === 0)
                     && isset($rpcConfig['service_name'])
                     && ($rpcConfig['service_name'] === $serviceName)
-                    && (strstr($serviceClassName, '\\V' . $api->getVersion() . '\\') !== false)
+                    && (strstr($serviceClassName, '\\V' . $api->getVersion() . '\\') !== FALSE)
                 ) {
                     $serviceData = $rpcConfig;
                     $serviceData['action'] = $this->marshalActionFromRouteConfig(
@@ -168,14 +175,14 @@ class ApiFactory
                         $serviceClassName,
                         $rpcConfig
                     );
-                    $isRpc = true;
+                    $isRpc = TRUE;
                     break;
                 }
             }
         }
 
         if (!$serviceData || !isset($serviceClassName)) {
-            return false;
+            return FALSE;
         }
 
         $authorizations = $this->getAuthorizations($serviceClassName);
@@ -197,14 +204,37 @@ class ApiFactory
             $service->setRouteIdentifierName($serviceData['route_identifier_name']);
         }
 
-        $fields = array();
+        $fields = [];
         if (isset($this->config['zf-content-validation'][$serviceClassName]['input_filter'])) {
             $validatorName = $this->config['zf-content-validation'][$serviceClassName]['input_filter'];
+
+            $inputFilterSpecExtract = [];
+
+            if (TRUE === is_subclass_of(
+                    $this->config['zf-content-validation'][$serviceClassName]['input_filter'],
+                    InputFilter::class)
+            ) {
+
+                $inputFilterClassName = $this->config['zf-content-validation'][$serviceClassName]['input_filter'];
+
+                /** @var InputFilter $inputFilter */
+                $inputFilter = new $inputFilterClassName;
+                $inputFilter->init();
+
+
+                $inputFilterSpecExtract[] = $this->extractInputData($inputFilter);
+            }
+
+
+            if (FALSE === isset($this->config['input_filter_specs'][$validatorName]) && FALSE === empty($inputFilterSpecExtract)) {
+                $this->config['input_filter_specs'][$validatorName] = $inputFilterSpecExtract;
+            }
+
             if (isset($this->config['input_filter_specs'][$validatorName])) {
                 foreach ($this->mapFields($this->config['input_filter_specs'][$validatorName]) as $fieldData) {
                     $fields['input_filter'][] = $this->getField($fieldData);
                 }
-                $hasFields = true;
+                $hasFields = TRUE;
             }
         }
 
@@ -212,23 +242,47 @@ class ApiFactory
             ? $serviceData['collection_http_methods']
             : $serviceData['http_methods'];
 
-        $ops = array();
+        $ops = [];
+
+
         foreach ($baseOperationData as $httpMethod) {
             $op = new Operation();
             $op->setHttpMethod($httpMethod);
 
             if (isset($this->config['zf-content-validation'][$serviceClassName][$httpMethod])) {
                 $validatorName = $this->config['zf-content-validation'][$serviceClassName][$httpMethod];
+
+                $httpMethodInputFilterSpec = [];
+
+                if (TRUE === is_subclass_of(
+                        $this->config['zf-content-validation'][$serviceClassName][$httpMethod],
+                        InputFilter::class)
+                ) {
+
+
+                    $inputFilterClassName = $this->config['zf-content-validation'][$serviceClassName][$httpMethod];
+
+                    /** @var InputFilter $inputFilter */
+                    $inputFilter = new $inputFilterClassName;
+                    $inputFilter->init();
+
+
+                    /** @var Input $input */
+
+                    $httpMethodInputFilterSpec = $this->extractInputData($inputFilter);
+                }
+
+                if (FALSE === isset($this->config['input_filter_specs'][$validatorName]) && FALSE === empty($httpMethodInputFilterSpec)) {
+                    $this->config['input_filter_specs'][$validatorName] = $httpMethodInputFilterSpec;
+                }
+
+
                 if (isset($this->config['input_filter_specs'][$validatorName])) {
                     foreach ($this->config['input_filter_specs'][$validatorName] as $fieldData) {
-                        $fields[$httpMethod][] = $field = new Field();
-                        $field->setName($fieldData['name']);
-                        if (isset($fieldData['description'])) {
-                            $field->setDescription($fieldData['description']);
-                        }
-                        $field->setRequired($fieldData['required']);
+
+                        $fields[$httpMethod][] = $this->getField($fieldData);
                     }
-                    $hasFields = true;
+                    $hasFields = TRUE;
                 }
             }
 
@@ -250,13 +304,13 @@ class ApiFactory
                 $op->setResponseDescription($responseDescription);
                 $op->setRequiresAuthorization(
                     isset($authorizations['collection'][$httpMethod])
-                    ? $authorizations['collection'][$httpMethod]
-                    : false
+                        ? $authorizations['collection'][$httpMethod]
+                        : FALSE
                 );
 
                 $op->setResponseStatusCodes($this->getStatusCodes(
                     $httpMethod,
-                    false,
+                    FALSE,
                     $hasFields,
                     $op->requiresAuthorization()
                 ));
@@ -280,8 +334,8 @@ class ApiFactory
 
                 $op->setRequiresAuthorization(
                     isset($authorizations['actions'][$serviceData['action']][$httpMethod])
-                    ? $authorizations['actions'][$serviceData['action']][$httpMethod]
-                    : false
+                        ? $authorizations['actions'][$serviceData['action']][$httpMethod]
+                        : FALSE
                 );
                 $op->setResponseStatusCodes($this->getStatusCodes(
                     $httpMethod,
@@ -294,11 +348,12 @@ class ApiFactory
             $ops[] = $op;
         }
 
+
         $service->setFields($fields);
         $service->setOperations($ops);
 
         if (isset($serviceData['entity_http_methods'])) {
-            $ops = array();
+            $ops = [];
             foreach ($serviceData['entity_http_methods'] as $httpMethod) {
                 $op = new Operation();
                 $op->setHttpMethod($httpMethod);
@@ -320,12 +375,12 @@ class ApiFactory
 
                 $op->setRequiresAuthorization(
                     isset($authorizations['entity'][$httpMethod])
-                    ? $authorizations['entity'][$httpMethod]
-                    : false
+                        ? $authorizations['entity'][$httpMethod]
+                        : FALSE
                 );
                 $op->setResponseStatusCodes($this->getStatusCodes(
                     $httpMethod,
-                    true,
+                    TRUE,
                     $hasFields,
                     $op->requiresAuthorization()
                 ));
@@ -350,8 +405,9 @@ class ApiFactory
     }
 
     /**
-     * @param array $fields
+     * @param array  $fields
      * @param string $prefix To unwind nesting of fields
+     *
      * @return array
      */
     private function mapFields(array $fields, $prefix = '')
@@ -365,14 +421,15 @@ class ApiFactory
             if ($prefix) {
                 $fields['name'] = sprintf('%s/%s', $prefix, $fields['name']);
             }
-            return array($fields);
+
+            return [$fields,];
         }
 
-        $flatFields = array();
+        $flatFields = [];
 
         foreach ($fields as $idx => $field) {
             if (isset($field['type']) && is_subclass_of($field['type'], 'Zend\InputFilter\InputFilterInterface')) {
-                $filteredFields = array_diff_key($field, array('type' => 0));
+                $filteredFields = array_diff_key($field, ['type' => 0,]);
                 $fullindex = $prefix ? sprintf('%s/%s', $prefix, $idx) : $idx;
                 $flatFields = array_merge($flatFields, $this->mapFields($filteredFields, $fullindex));
                 continue;
@@ -386,6 +443,7 @@ class ApiFactory
 
     /**
      * @param array $fieldData
+     *
      * @return Field
      */
     private function getField(array $fieldData)
@@ -401,8 +459,22 @@ class ApiFactory
             $field->setType($fieldData['type']);
         }
 
-        $required = isset($fieldData['required']) ? (bool) $fieldData['required'] : false;
+        if (isset($fieldData['fields'])) {
+
+
+
+            $children = [];
+            foreach ($fieldData['fields'] as $childFieldData) {
+                $children[] = $child = $this->getField($childFieldData);
+                $child->setNested(TRUE);
+            }
+
+            $field->setChildren($children);
+        }
+
+        $required = isset($fieldData['required']) ? (bool)$fieldData['required'] : FALSE;
         $field->setRequired($required);
+
 
         return $field;
     }
@@ -411,6 +483,7 @@ class ApiFactory
      * Retrieve the documentation for a given API module
      *
      * @param string $apiName
+     *
      * @return array
      */
     protected function getDocumentationConfig($apiName)
@@ -424,7 +497,7 @@ class ApiFactory
         if (file_exists($docConfigPath)) {
             $this->docs[$apiName] = include $docConfigPath;
         } else {
-            $this->docs[$apiName] = array();
+            $this->docs[$apiName] = [];
         }
 
         return $this->docs[$apiName];
@@ -434,13 +507,15 @@ class ApiFactory
      * Retrieve authorization data for the given service
      *
      * @param string $serviceName
+     *
      * @return array
      */
     protected function getAuthorizations($serviceName)
     {
-        if (! isset($this->config['zf-mvc-auth']['authorization'][$serviceName])) {
-            return array();
+        if (!isset($this->config['zf-mvc-auth']['authorization'][$serviceName])) {
+            return [];
         }
+
         return $this->config['zf-mvc-auth']['authorization'][$serviceName];
     }
 
@@ -449,19 +524,20 @@ class ApiFactory
      *
      * @param string $serviceName
      * @param string $serviceClassName
-     * @param array $config
+     * @param array  $config
+     *
      * @return string
      */
     protected function marshalActionFromRouteConfig($serviceName, $serviceClassName, array $config)
     {
-        if (! isset($config['route_name'])) {
+        if (!isset($config['route_name'])) {
             return $serviceName;
         }
-        if (! isset($this->config['router']['routes'][$config['route_name']])) {
+        if (!isset($this->config['router']['routes'][$config['route_name']])) {
             return $serviceName;
         }
         $route = $this->config['router']['routes'][$config['route_name']];
-        if (! isset($route['options']['defaults']['action'])) {
+        if (!isset($route['options']['defaults']['action'])) {
             return $serviceName;
         }
 
@@ -475,52 +551,118 @@ class ApiFactory
 
     protected function getStatusCodes($httpMethod, $hasOptionalSegments, $hasValidation, $requiresAuthorization)
     {
-        $statusCodes = array(
-            array('code' => '406', 'message' => 'Not Acceptable'),
-            array('code' => '415', 'message' => 'Unsupported Media Type'),
-        );
+        $statusCodes = [
+            ['code'    => '406',
+             'message' => 'Not Acceptable',],
+            ['code'    => '415',
+             'message' => 'Unsupported Media Type',],
+        ];
 
         switch ($httpMethod) {
             case 'GET':
-                array_push($statusCodes, array('code' => '200', 'message' => 'OK'));
+                array_push($statusCodes,
+                           ['code'    => '200',
+                            'message' => 'OK',]);
                 if ($hasOptionalSegments) {
-                    array_push($statusCodes, array('code' => '404', 'message' => 'Not Found'));
+                    array_push($statusCodes,
+                               ['code'    => '404',
+                                'message' => 'Not Found',]);
                 }
                 break;
             case 'DELETE':
-                array_push($statusCodes, array('code' => '204', 'message' => 'No Content'));
+                array_push($statusCodes,
+                           ['code'    => '204',
+                            'message' => 'No Content',]);
                 if ($hasOptionalSegments) {
-                    array_push($statusCodes, array('code' => '404', 'message' => 'Not Found'));
+                    array_push($statusCodes,
+                               ['code'    => '404',
+                                'message' => 'Not Found',]);
                 }
                 break;
             case 'POST':
-                array_push($statusCodes, array('code' => '201', 'message' => 'Created'));
+                array_push($statusCodes,
+                           ['code'    => '201',
+                            'message' => 'Created',]);
                 if ($hasOptionalSegments) {
-                    array_push($statusCodes, array('code' => '404', 'message' => 'Not Found'));
+                    array_push($statusCodes,
+                               ['code'    => '404',
+                                'message' => 'Not Found',]);
                 }
                 if ($hasValidation) {
-                    array_push($statusCodes, array('code' => '400', 'message' => 'Client Error'));
-                    array_push($statusCodes, array('code' => '422', 'message' => 'Unprocessable Entity'));
+                    array_push($statusCodes,
+                               ['code'    => '400',
+                                'message' => 'Client Error',]);
+                    array_push($statusCodes,
+                               ['code'    => '422',
+                                'message' => 'Unprocessable Entity',]);
                 }
                 break;
             case 'PATCH':
             case 'PUT':
-                array_push($statusCodes, array('code' => '200', 'message' => 'OK'));
+                array_push($statusCodes,
+                           ['code'    => '200',
+                            'message' => 'OK',]);
                 if ($hasOptionalSegments) {
-                    array_push($statusCodes, array('code' => '404', 'message' => 'Not Found'));
+                    array_push($statusCodes,
+                               ['code'    => '404',
+                                'message' => 'Not Found',]);
                 }
                 if ($hasValidation) {
-                    array_push($statusCodes, array('code' => '400', 'message' => 'Client Error'));
-                    array_push($statusCodes, array('code' => '422', 'message' => 'Unprocessable Entity'));
+                    array_push($statusCodes,
+                               ['code'    => '400',
+                                'message' => 'Client Error',]);
+                    array_push($statusCodes,
+                               ['code'    => '422',
+                                'message' => 'Unprocessable Entity',]);
                 }
                 break;
         }
 
         if ($requiresAuthorization) {
-            array_push($statusCodes, array('code' => '401', 'message' => 'Unauthorized'));
-            array_push($statusCodes, array('code' => '403', 'message' => 'Forbidden'));
+            array_push($statusCodes,
+                       ['code'    => '401',
+                        'message' => 'Unauthorized',]);
+            array_push($statusCodes,
+                       ['code'    => '403',
+                        'message' => 'Forbidden',]);
         }
 
         return $statusCodes;
+    }
+
+    /**
+     * @param $inputFilter
+     *
+     * @return array
+     * @internal param $httpMethodInputFilterSpec
+     *
+     */
+    private function extractInputData(InputFilter $inputFilter)
+    {
+
+
+        foreach ($inputFilter->getInputs() as $fieldName => $input) {
+
+
+            if (TRUE === ($input instanceof Input)) {
+                $filterSpec[] = [
+                    'name'              => $input->getName(),
+                    'required'          => $input->isRequired(),
+                    'allow_empty'       => $input->allowEmpty(),
+                    'continue_if_empty' => $input->continueIfEmpty(),
+                ];
+            } /** @var InputFilter $input */
+            elseif (TRUE === ($input instanceof InputFilter)) {
+
+
+                $filterSpec[] = [
+                    'name'   => $fieldName,
+                    'type'   => 'object',
+                    'fields' => $this->extractInputData($input),
+                ];
+            }
+        }
+
+        return $filterSpec;
     }
 }
